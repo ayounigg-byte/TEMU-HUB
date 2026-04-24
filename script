@@ -1,0 +1,303 @@
+--// SERVICES
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UIS = game:GetService("UserInputService")
+local Lighting = game:GetService("Lighting")
+
+local LocalPlayer = Players.LocalPlayer
+local Camera = workspace.CurrentCamera
+
+--------------------------------------------------
+-- ✨ UI INITIALIZATION
+--------------------------------------------------
+local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
+task.wait(0.5)
+
+local Window = Rayfield:CreateWindow({
+    Name = "🎯 TEMU Hub | RIVALS 🏆",
+    LoadingTitle = "🚀 Loading TEMU...",
+    LoadingSubtitle = "by TEMU",
+    ConfigurationSaving = { Enabled = false }
+})
+
+local PlayerTab = Window:CreateTab("👤 Player", 4483362458)
+local ESPTab = Window:CreateTab("👁️ ESP", 4483362458)
+local CombatTab = Window:CreateTab("⚔️ Combat", 4483362458)
+local VisualTab = Window:CreateTab("⚙️ Visuals", 4483362458)
+
+--------------------------------------------------
+-- 🛡️ UTILITIES
+--------------------------------------------------
+local function isEnemy(plr)
+    if not plr or plr == LocalPlayer then return false end
+    local myT = LocalPlayer:GetAttribute("TeamID")
+    local thrT = plr:GetAttribute("TeamID")
+    if myT ~= nil and thrT ~= nil then return tostring(myT) ~= tostring(thrT) end
+    if LocalPlayer.Team and plr.Team then return LocalPlayer.Team ~= plr.Team end
+    return true
+end
+
+local function getValidHead(char)
+    local head = char:FindFirstChild("Head")
+    if not head then return nil end
+    local params = RaycastParams.new()
+    params.FilterType = Enum.RaycastFilterType.Exclude
+    params.FilterDescendantsInstances = {LocalPlayer.Character, Camera}
+    local result = workspace:Raycast(Camera.CFrame.Position, (head.Position - Camera.CFrame.Position).Unit * 1000, params)
+    return (result == nil or result.Instance:IsDescendantOf(char)) and head or nil
+end
+
+local function getValidPart(char, partName)
+    local part = char:FindFirstChild(partName)
+    if not part then return nil end
+    local params = RaycastParams.new()
+    params.FilterType = Enum.RaycastFilterType.Exclude
+    params.FilterDescendantsInstances = {LocalPlayer.Character, Camera}
+    local result = workspace:Raycast(Camera.CFrame.Position, (part.Position - Camera.CFrame.Position).Unit * 1000, params)
+    return (result == nil or result.Instance:IsDescendantOf(char)) and part or nil
+end
+
+--------------------------------------------------
+-- 👤 PLAYER TAB
+--------------------------------------------------
+PlayerTab:CreateSection("Movement Mods")
+local flying, infiniteJump, noclip = false, false, false
+
+local function Fly()
+    local char = LocalPlayer.Character
+    if not char then return end
+    local hrp = char:FindFirstChild("HumanoidRootPart")
+    local bv = Instance.new("BodyVelocity", hrp)
+    bv.MaxForce = Vector3.new(1e5, 1e5, 1e5)
+    while flying do
+        local move = Vector3.zero
+        if UIS:IsKeyDown(Enum.KeyCode.W) then move += Camera.CFrame.LookVector end
+        if UIS:IsKeyDown(Enum.KeyCode.S) then move -= Camera.CFrame.LookVector end
+        if UIS:IsKeyDown(Enum.KeyCode.A) then move -= Camera.CFrame.RightVector end
+        if UIS:IsKeyDown(Enum.KeyCode.D) then move += Camera.CFrame.RightVector end
+        if UIS:IsKeyDown(Enum.KeyCode.Space) then move += Vector3.new(0, 1, 0) end
+        if UIS:IsKeyDown(Enum.KeyCode.LeftControl) then move -= Vector3.new(0, 1, 0) end
+        bv.Velocity = move * 60
+        task.wait()
+    end
+    bv:Destroy()
+end
+
+UIS.JumpRequest:Connect(function() if infiniteJump then local h = LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Humanoid") if h then h:ChangeState("Jumping") end end end)
+RunService.Stepped:Connect(function() if noclip and LocalPlayer.Character then for _, v in pairs(LocalPlayer.Character:GetDescendants()) do if v:IsA("BasePart") then v.CanCollide = false end end end end)
+
+PlayerTab:CreateToggle({Name="✈️ Fly", Callback=function(v) flying=v if v then task.spawn(Fly) end end})
+PlayerTab:CreateToggle({Name="🦘 Infinite Jump", Callback=function(v) infiniteJump=v end})
+PlayerTab:CreateToggle({Name="👻 Noclip", Callback=function(v) noclip=v end})
+PlayerTab:CreateSlider({Name="🏃 WalkSpeed", Range={16, 200}, Increment=1, CurrentValue=16, Callback=function(v) if LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("Humanoid") then LocalPlayer.Character.Humanoid.WalkSpeed = v end end})
+
+--------------------------------------------------
+-- ⚔️ COMBAT TAB
+--------------------------------------------------
+CombatTab:CreateSection("Targeting")
+local maxDistance = 500
+getgenv().SilentAimEnabled = false
+getgenv().SoftLockEnabled = false
+local fovEnabled = false
+local calculatedRadius = 180 
+
+CombatTab:CreateToggle({Name="🎯 Silent Aim (Full Range)", Callback=function(v) getgenv().SilentAimEnabled = v end})
+CombatTab:CreateToggle({Name="🔒 Soft Lock (FOV Only)", Callback=function(v) getgenv().SoftLockEnabled = v end})
+CombatTab:CreateSlider({Name="📏 Max Distance", Range={100, 2000}, Increment=50, CurrentValue=500, Callback=function(v) maxDistance = v end})
+
+CombatTab:CreateSection("FOV Settings")
+CombatTab:CreateToggle({Name="⭕ Show FOV Circle", Callback=function(v) fovEnabled = v end})
+CombatTab:CreateSlider({Name="🌀 FOV Level (1-10)", Range={1, 10}, Increment=1, CurrentValue=3, Callback=function(v) calculatedRadius = v * 60 end})
+
+CombatTab:CreateSection("Aim Target")
+local aimTarget = "Head"
+CombatTab:CreateDropdown({Name="🎯 Target Part", Options={"Head", "Torso", "Random", "Closest to Crosshair"}, CurrentOption="Head", Callback=function(v) aimTarget = v end})
+
+local mainGui = Instance.new("ScreenGui", (gethui and gethui()) or game:GetService("CoreGui"))
+mainGui.IgnoreGuiInset = true 
+local fovCircle = Instance.new("Frame", mainGui)
+local stroke = Instance.new("UIStroke", fovCircle); local corner = Instance.new("UICorner", fovCircle)
+fovCircle.AnchorPoint = Vector2.new(0.5, 0.5); fovCircle.Position = UDim2.new(0.5, 0, 0.5, 0)
+fovCircle.BackgroundTransparency = 1; stroke.Thickness = 2; corner.CornerRadius = UDim.new(1, 0)
+
+--------------------------------------------------
+-- 👁️ ESP SYSTEM
+--------------------------------------------------
+local chamsEnabled, tracersEnabled = false, false
+local tracers = {}
+
+ESPTab:CreateSection("Visuals")
+ESPTab:CreateToggle({Name="🌈 Enemy Chams", Callback=function(v) chamsEnabled = v end})
+ESPTab:CreateToggle({Name="📏 Crosshair Tracers (Torso)", Callback=function(v) tracersEnabled = v end})
+
+local function createTracer(plr)
+    local l = Drawing.new("Line")
+    l.Thickness = 1.5; l.Transparency = 1; l.Visible = false; tracers[plr] = l
+end
+for _, p in pairs(Players:GetPlayers()) do if p ~= LocalPlayer then createTracer(p) end end
+Players.PlayerAdded:Connect(createTracer)
+
+--------------------------------------------------
+-- 🔥 MASTER ENGINE
+--------------------------------------------------
+local activeTargetPos = nil 
+
+RunService.RenderStepped:Connect(function()
+    local rgb = Color3.fromHSV((tick() % 5) / 5, 1, 1)
+    local screenCenter = Camera.ViewportSize / 2
+    
+    fovCircle.Visible = fovEnabled
+    if fovEnabled then
+        fovCircle.Size = UDim2.new(0, calculatedRadius * 2, 0, calculatedRadius * 2)
+        stroke.Color = rgb
+    end
+
+    local bestTarget = nil
+    local shortestDist = 9e9
+
+    for _, plr in pairs(Players:GetPlayers()) do
+        local tracer = tracers[plr]
+        local char = plr.Character
+        if char and isEnemy(plr) then
+            local head = char:FindFirstChild("Head")
+            local torso = char:FindFirstChild("UpperTorso") or char:FindFirstChild("Torso") or char:FindFirstChild("HumanoidRootPart")
+            local highlight = char:FindFirstChild("Highlight") or Instance.new("Highlight", char)
+            
+            if head and torso then
+                local distFromMe = (head.Position - Camera.CFrame.Position).Magnitude
+                local headPos, headOnScreen = Camera:WorldToViewportPoint(head.Position)
+                local torsoPos, torsoOnScreen = Camera:WorldToViewportPoint(torso.Position)
+                local fovDist = (Vector2.new(headPos.X, headPos.Y) - screenCenter).Magnitude
+
+                if tracer then
+                    tracer.Visible = (tracersEnabled and torsoOnScreen and distFromMe <= maxDistance)
+                    if tracer.Visible then
+                        tracer.From = screenCenter 
+                        tracer.To = Vector2.new(torsoPos.X, torsoPos.Y)
+                        tracer.Color = rgb
+                    end
+                end
+
+                highlight.Enabled = chamsEnabled; highlight.FillColor = rgb
+
+                if distFromMe <= maxDistance then
+                    local targetPart = nil
+                    local targetPos = nil
+                    local targetOnScreen = false
+                    local targetFovDist = 9e9
+
+                    if aimTarget == "Head" then
+                        targetPart = getValidHead(char)
+                        if targetPart then
+                            targetPos, targetOnScreen = Camera:WorldToViewportPoint(targetPart.Position)
+                            targetFovDist = targetOnScreen and (Vector2.new(targetPos.X, targetPos.Y) - screenCenter).Magnitude or 9e9
+                        end
+                    elseif aimTarget == "Torso" then
+                        targetPart = getValidPart(char, torso.Name)
+                        if targetPart then
+                            targetPos, targetOnScreen = Camera:WorldToViewportPoint(targetPart.Position)
+                            targetFovDist = targetOnScreen and (Vector2.new(targetPos.X, targetPos.Y) - screenCenter).Magnitude or 9e9
+                        end
+                    elseif aimTarget == "Random" then
+                        local parts = {head, torso}
+                        targetPart = parts[math.random(1, 2)]
+                        targetPart = getValidPart(char, targetPart.Name)
+                        if targetPart then
+                            targetPos, targetOnScreen = Camera:WorldToViewportPoint(targetPart.Position)
+                            targetFovDist = targetOnScreen and (Vector2.new(targetPos.X, targetPos.Y) - screenCenter).Magnitude or 9e9
+                        end
+                    elseif aimTarget == "Closest to Crosshair" then
+                        local candidates = {}
+                        if getValidHead(char) then
+                            local pos, on = Camera:WorldToViewportPoint(head.Position)
+                            if on then
+                                table.insert(candidates, {part = head, dist = (Vector2.new(pos.X, pos.Y) - screenCenter).Magnitude})
+                            end
+                        end
+                        if getValidPart(char, torso.Name) then
+                            local pos, on = Camera:WorldToViewportPoint(torso.Position)
+                            if on then
+                                table.insert(candidates, {part = torso, dist = (Vector2.new(pos.X, pos.Y) - screenCenter).Magnitude})
+                            end
+                        end
+                        if #candidates > 0 then
+                            table.sort(candidates, function(a, b) return a.dist < b.dist end)
+                            targetPart = candidates[1].part
+                            targetPos, targetOnScreen = Camera:WorldToViewportPoint(targetPart.Position)
+                            targetFovDist = candidates[1].dist
+                        end
+                    end
+
+                    if targetPart and targetOnScreen then
+                        if getgenv().SoftLockEnabled then
+                            if targetFovDist <= calculatedRadius and targetFovDist < shortestDist then
+                                shortestDist = targetFovDist; bestTarget = targetPart
+                            end
+                        elseif getgenv().SilentAimEnabled then
+                            if targetFovDist < shortestDist then
+                                shortestDist = targetFovDist; bestTarget = targetPart
+                            end
+                        end
+                    end
+                end
+            end
+        elseif tracer then tracer.Visible = false end
+    end
+    activeTargetPos = bestTarget and bestTarget.Position or nil
+end)
+
+local old; old = hookmetamethod(game, "__index", newcclosure(function(self, idx)
+    if (getgenv().SilentAimEnabled or getgenv().SoftLockEnabled) and activeTargetPos and not checkcaller() and idx == "ViewportSize" and self == Camera then
+        local pos, on = Camera:WorldToViewportPoint(activeTargetPos)
+        if on then return Vector2.new(pos.X * 2, pos.Y * 2) end
+    end
+    return old(self, idx)
+end))
+
+--------------------------------------------------
+-- ⚙️ VISUALS TAB (EXTREME FPS BOOST)
+--------------------------------------------------
+VisualTab:CreateSection("Performance")
+VisualTab:CreateToggle({Name="☀️ Fullbright", Callback=function(v) Lighting.Brightness = v and 2 or 1 Lighting.ClockTime = v and 14 or 12 Lighting.GlobalShadows = not v end})
+VisualTab:CreateToggle({Name="🚀 FPS Boost Mode", Callback=function(v)
+    if v then
+        -- Additional FPS optimizations
+        settings().Rendering.QualityLevel = 1  -- Low quality
+        UserSettings().GameSettings.MasterVolume = 0  -- Mute sounds? Wait, maybe not.
+        -- Disable more effects if possible
+        for _, v in pairs(Lighting:GetChildren()) do
+            if v:IsA("DepthOfFieldEffect") or v:IsA("Atmosphere") then
+                v.Enabled = false
+            end
+        end
+        Rayfield:Notify({Title="🚀 FPS Boost Enabled", Content="Graphics quality reduced.", Duration=2})
+    else
+        settings().Rendering.QualityLevel = 7  -- Back to high
+        Rayfield:Notify({Title="🚀 FPS Boost Disabled", Content="Graphics quality restored.", Duration=2})
+    end
+end})
+
+VisualTab:CreateButton({Name="🚀 EXTREME FPS BOOST", Callback=function()
+    -- 1. Strip World Textures
+    for _, v in pairs(workspace:GetDescendants()) do
+        if v:IsA("BasePart") and not v:IsAncestorOf(LocalPlayer.Character) then
+            v.Material = Enum.Material.SmoothPlastic
+        elseif v:IsA("Texture") or v:IsA("Decal") then
+            v:Destroy()
+        -- 2. Strip VFX & Effects
+        elseif v:IsA("ParticleEmitter") or v:IsA("Trail") or v:IsA("Beam") or v:IsA("Fire") or v:IsA("Smoke") or v:IsA("Explosion") then
+            v.Enabled = false
+        end
+    end
+
+    -- 3. Clear Post-Processing
+    for _, v in pairs(Lighting:GetChildren()) do
+        if v:IsA("PostProcessEffect") or v:IsA("BloomEffect") or v:IsA("BlurEffect") or v:IsA("SunRaysEffect") or v:IsA("ColorCorrectionEffect") then
+            v.Enabled = false
+        end
+    end
+    
+    Rayfield:Notify({Title="🚀 Optimized", Content="Textures, VFX, and Post-Processing cleared.", Duration=3})
+end})
+
+Rayfield:Notify({Title="✅ Loaded", Content="TEMU Hub loaded successfully.", Duration=3})
