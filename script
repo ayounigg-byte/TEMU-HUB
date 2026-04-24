@@ -302,12 +302,16 @@ RunService.RenderStepped:Connect(function()
 
     if triggerBotEnabled and triggerTarget and tick() - lastTriggerTime >= triggerBotDelay then
         lastTriggerTime = tick()
+        -- Fire using the weapon's remote or direct call (avoids mouse visibility)
         pcall(function()
-            if mouse1click then
-                mouse1click()
-            elseif Mouse and Mouse.Button1Down then
-                -- fallback: fire the mouse click event
-                Mouse.Button1Down:Fire()
+            local weapon = LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Tool")
+            if weapon then
+                local fire = weapon:FindFirstChild("Fire") or weapon:FindFirstChild("Shoot")
+                if fire and fire:IsA("RemoteEvent") then
+                    fire:FireServer()
+                elseif fire and fire:IsA("RemoteFunction") then
+                    fire:InvokeServer()
+                end
             end
         end)
     end
@@ -371,7 +375,6 @@ VisualTab:CreateToggle({Name="🚀 FPS Boost Mode", Callback=function(v)
     if v then
         -- Additional FPS optimizations
         settings().Rendering.QualityLevel = 1  -- Low quality
-        UserSettings().GameSettings.MasterVolume = 0  -- Mute sounds? Wait, maybe not.
         -- Disable more effects if possible
         for _, v in pairs(Lighting:GetChildren()) do
             if v:IsA("DepthOfFieldEffect") or v:IsA("Atmosphere") then
