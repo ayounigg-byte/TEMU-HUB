@@ -6,6 +6,7 @@ local Lighting = game:GetService("Lighting")
 
 local LocalPlayer = Players.LocalPlayer
 local Camera = workspace.CurrentCamera
+local Mouse = LocalPlayer:GetMouse()
 
 --------------------------------------------------
 -- ✨ UI INITIALIZATION
@@ -113,8 +114,53 @@ CombatTab:CreateSection("Aim Target")
 local aimTarget = "Head"
 CombatTab:CreateDropdown({Name="🎯 Target Part", Options={"Head", "Torso", "Random", "Closest to Crosshair"}, CurrentOption="Head", Callback=function(v) aimTarget = v end})
 
+CombatTab:CreateSection("Trigger Bot")
+local triggerBotEnabled = false
+local triggerBotDelay = 0.1
+local triggerBotRadius = 30
+local rageModeEnabled = false
+local rageDistance = 1000
+local rageTargetPos = nil
+local lastTriggerTime = 0
+CombatTab:CreateToggle({Name="🔫 Trigger Bot", Callback=function(v) triggerBotEnabled = v end})
+CombatTab:CreateSlider({Name="⏱️ Trigger Delay", Range={0, 0.5}, Increment=0.05, CurrentValue=0.1, Callback=function(v) triggerBotDelay = v end})
+CombatTab:CreateSlider({Name="🎯 Trigger Radius", Range={5, 100}, Increment=5, CurrentValue=30, Callback=function(v) triggerBotRadius = v end})
+
+CombatTab:CreateSection("Rage Mode")
+CombatTab:CreateToggle({Name="⚡ Rage (Risk)", Callback=function(v) rageModeEnabled = v end})
+CombatTab:CreateSlider({Name="📏 Rage Distance", Range={100, 1000}, Increment=50, CurrentValue=1000, Callback=function(v) rageDistance = v end})
+
+local function rageVisible(targetPart, camPos)
+    local params = RaycastParams.new()
+    params.FilterType = Enum.RaycastFilterType.Exclude
+    params.FilterDescendantsInstances = {LocalPlayer.Character, targetPart.Parent, workspace:FindFirstChild("Debris")}
+    local result = workspace:Raycast(camPos, (targetPart.Position - camPos).Unit * rageDistance, params)
+    return result == nil or result.Instance:IsDescendantOf(targetPart.Parent)
+end
+
+local function rageValid(plr, camPos)
+    local char = plr.Character
+    if not char then return false end
+    local hum = char:FindFirstChildOfClass("Humanoid")
+    local head = char:FindFirstChild("Head")
+    if not (hum and head and hum.Health > 0) then return false end
+    local mag = (head.Position - camPos).Magnitude
+    if mag > rageDistance then return false end
+    if not isEnemy(plr) then return false end
+    return rageVisible(head, camPos)
+end
+
 local mainGui = Instance.new("ScreenGui", (gethui and gethui()) or game:GetService("CoreGui"))
 mainGui.IgnoreGuiInset = true 
+local rageLabel = Instance.new("TextLabel", mainGui)
+rageLabel.Size = UDim2.fromOffset(250, 25)
+rageLabel.Position = UDim2.new(1, -260, 0, 10)
+rageLabel.BackgroundTransparency = 1
+rageLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+rageLabel.Font = Enum.Font.Code
+rageLabel.TextSize = 12
+rageLabel.TextXAlignment = Enum.TextXAlignment.Right
+rageLabel.Text = "RAGE OFF"
 local fovCircle = Instance.new("Frame", mainGui)
 local stroke = Instance.new("UIStroke", fovCircle); local corner = Instance.new("UICorner", fovCircle)
 fovCircle.AnchorPoint = Vector2.new(0.5, 0.5); fovCircle.Position = UDim2.new(0.5, 0, 0.5, 0)
@@ -154,6 +200,7 @@ RunService.RenderStepped:Connect(function()
 
     local bestTarget = nil
     local shortestDist = 9e9
+    local triggerTarget = nil
 
     for _, plr in pairs(Players:GetPlayers()) do
         local tracer = tracers[plr]
@@ -199,25 +246,30 @@ RunService.RenderStepped:Connect(function()
                             targetFovDist = targetOnScreen and (Vector2.new(targetPos.X, targetPos.Y) - screenCenter).Magnitude or 9e9
                         end
                     elseif aimTarget == "Random" then
-                        local parts = {head, torso}
-                        targetPart = parts[math.random(1, 2)]
-                        targetPart = getValidPart(char, targetPart.Name)
-                        if targetPart then
+                        local validHead = getValidHead(char)
+                        local validTorso = getValidPart(char, torso.Name)
+                        local parts = {}
+                        if validHead then table.insert(parts, validHead) end
+                        if validTorso then table.insert(parts, validTorso) end
+                        if #parts > 0 then
+                            targetPart = parts[math.random(1, #parts)]
                             targetPos, targetOnScreen = Camera:WorldToViewportPoint(targetPart.Position)
                             targetFovDist = targetOnScreen and (Vector2.new(targetPos.X, targetPos.Y) - screenCenter).Magnitude or 9e9
                         end
                     elseif aimTarget == "Closest to Crosshair" then
                         local candidates = {}
-                        if getValidHead(char) then
-                            local pos, on = Camera:WorldToViewportPoint(head.Position)
+                        local validHead = getValidHead(char)
+                        if validHead then
+                            local pos, on = Camera:WorldToViewportPoint(validHead.Position)
                             if on then
-                                table.insert(candidates, {part = head, dist = (Vector2.new(pos.X, pos.Y) - screenCenter).Magnitude})
+                                table.insert(candidates, {part = validHead, dist = (Vector2.new(pos.X, pos.Y) - screenCenter).Magnitude})
                             end
                         end
-                        if getValidPart(char, torso.Name) then
-                            local pos, on = Camera:WorldToViewportPoint(torso.Position)
+                        local validTorso = getValidPart(char, torso.Name)
+                        if validTorso then
+                            local pos, on = Camera:WorldToViewportPoint(validTorso.Position)
                             if on then
-                                table.insert(candidates, {part = torso, dist = (Vector2.new(pos.X, pos.Y) - screenCenter).Magnitude})
+                                table.insert(candidates, {part = validTorso, dist = (Vector2.new(pos.X, pos.Y) - screenCenter).Magnitude})
                             end
                         end
                         if #candidates > 0 then
@@ -229,6 +281,9 @@ RunService.RenderStepped:Connect(function()
                     end
 
                     if targetPart and targetOnScreen then
+                        if triggerBotEnabled and targetFovDist <= triggerBotRadius then
+                            triggerTarget = targetPart
+                        end
                         if getgenv().SoftLockEnabled then
                             if targetFovDist <= calculatedRadius and targetFovDist < shortestDist then
                                 shortestDist = targetFovDist; bestTarget = targetPart
@@ -244,11 +299,64 @@ RunService.RenderStepped:Connect(function()
         elseif tracer then tracer.Visible = false end
     end
     activeTargetPos = bestTarget and bestTarget.Position or nil
+
+    if triggerBotEnabled and triggerTarget and tick() - lastTriggerTime >= triggerBotDelay then
+        lastTriggerTime = tick()
+        pcall(function()
+            if mouse1click then
+                mouse1click()
+            elseif Mouse and Mouse.Button1Down then
+                -- fallback: fire the mouse click event
+                Mouse.Button1Down:Fire()
+            end
+        end)
+    end
+end)
+
+RunService.Heartbeat:Connect(function()
+    if not rageModeEnabled then
+        rageTargetPos = nil
+        if rageLabel then
+            rageLabel.Text = "RAGE OFF"
+            rageLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+        end
+        return
+    end
+
+    Camera = workspace.CurrentCamera
+    local camPos = Camera.CFrame.Position
+    local best, bestDist = nil, math.huge
+    local center = Camera.ViewportSize / 2
+
+    for _, plr in pairs(Players:GetPlayers()) do
+        if plr ~= LocalPlayer and rageValid(plr, camPos) then
+            local pos, on = Camera:WorldToViewportPoint(plr.Character.Head.Position)
+            if on then
+                local d = (Vector2.new(pos.X, pos.Y) - center).Magnitude
+                if d < bestDist then
+                    bestDist = d
+                    best = plr
+                end
+            end
+        end
+    end
+
+    rageTargetPos = best and best.Character.Head.Position or nil
+    if rageLabel then
+        if best then
+            rageLabel.Text = "RAGE LOCK: " .. best.Name:upper()
+            rageLabel.TextColor3 = Color3.fromRGB(0, 255, 150)
+        else
+            rageLabel.Text = "RAGE SCANNING..."
+            rageLabel.TextColor3 = Color3.fromRGB(255, 80, 80)
+        end
+    end
 end)
 
 local old; old = hookmetamethod(game, "__index", newcclosure(function(self, idx)
-    if (getgenv().SilentAimEnabled or getgenv().SoftLockEnabled) and activeTargetPos and not checkcaller() and idx == "ViewportSize" and self == Camera then
-        local pos, on = Camera:WorldToViewportPoint(activeTargetPos)
+    local currentTarget = rageModeEnabled and rageTargetPos or activeTargetPos
+    if (rageModeEnabled or getgenv().SilentAimEnabled or getgenv().SoftLockEnabled) and currentTarget and not checkcaller() and idx == "ViewportSize" and self == Camera then
+        local pos, on = Camera:WorldToViewportPoint(currentTarget)
         if on then return Vector2.new(pos.X * 2, pos.Y * 2) end
     end
     return old(self, idx)
