@@ -11,7 +11,16 @@ local Mouse = LocalPlayer:GetMouse()
 --------------------------------------------------
 -- ✨ UI INITIALIZATION
 --------------------------------------------------
-local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
+local Rayfield
+local success, err = pcall(function()
+    Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
+end)
+
+if not success or not Rayfield then
+    warn("⚠️ Rayfield failed to load: " .. tostring(err))
+    return
+end
+
 task.wait(0.5)
 
 local Window = Rayfield:CreateWindow({
@@ -373,18 +382,24 @@ VisualTab:CreateSection("Performance")
 VisualTab:CreateToggle({Name="☀️ Fullbright", Callback=function(v) Lighting.Brightness = v and 2 or 1 Lighting.ClockTime = v and 14 or 12 Lighting.GlobalShadows = not v end})
 VisualTab:CreateToggle({Name="🚀 FPS Boost Mode", Callback=function(v)
     if v then
-        -- Additional FPS optimizations
-        settings().Rendering.QualityLevel = 1  -- Low quality
-        -- Disable more effects if possible
-        for _, v in pairs(Lighting:GetChildren()) do
-            if v:IsA("DepthOfFieldEffect") or v:IsA("Atmosphere") then
-                v.Enabled = false
+        -- Lightweight FPS optimization
+        pcall(function()
+            for _, effect in pairs(Lighting:GetChildren()) do
+                if effect:IsA("PostProcessEffect") or effect:IsA("BloomEffect") or effect:IsA("BlurEffect") then
+                    effect.Enabled = false
+                end
             end
-        end
-        Rayfield:Notify({Title="🚀 FPS Boost Enabled", Content="Graphics quality reduced.", Duration=2})
+        end)
+        Rayfield:Notify({Title="🚀 FPS Boost Enabled", Content="Post-processing disabled.", Duration=2})
     else
-        settings().Rendering.QualityLevel = 7  -- Back to high
-        Rayfield:Notify({Title="🚀 FPS Boost Disabled", Content="Graphics quality restored.", Duration=2})
+        pcall(function()
+            for _, effect in pairs(Lighting:GetChildren()) do
+                if effect:IsA("PostProcessEffect") or effect:IsA("BloomEffect") or effect:IsA("BlurEffect") then
+                    effect.Enabled = true
+                end
+            end
+        end)
+        Rayfield:Notify({Title="🚀 FPS Boost Disabled", Content="Graphics restored.", Duration=2})
     end
 end})
 
